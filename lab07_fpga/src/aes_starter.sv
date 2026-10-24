@@ -79,8 +79,73 @@ module aes_core(input  logic         clk,
                 output logic         done, 
                 output logic [127:0] cyphertext);
 
-    // TODO: Your code goes here
+    logic [9:0] count;
+    count = 0;
+
     
+    
+endmodule
+
+
+// Sub bytes module
+module subbytes(
+    input  logic         clk,
+    input  logic [127:0] state_in,
+    output logic [127:0] state_out
+);
+
+    // Ports
+    sbox_sync sb0 (state_in[127:120], clk, state_out[127:120]);
+    sbox_sync sb1 (state_in[119:112], clk, state_out[119:112]);
+    sbox_sync sb2 (state_in[111:104], clk, state_out[111:104]);
+    sbox_sync sb3 (state_in[103:96],  clk, state_out[103:96]);
+
+    sbox_sync sb4 (state_in[95:88],   clk, state_out[95:88]);
+    sbox_sync sb5 (state_in[87:80],   clk, state_out[87:80]);
+    sbox_sync sb6 (state_in[79:72],   clk, state_out[79:72]);
+    sbox_sync sb7 (state_in[71:64],   clk, state_out[71:64]);
+
+    sbox_sync sb8 (state_in[63:56],   clk, state_out[63:56]);
+    sbox_sync sb9 (state_in[55:48],   clk, state_out[55:48]);
+    sbox_sync sb10(state_in[47:40],   clk, state_out[47:40]);
+    sbox_sync sb11(state_in[39:32],   clk, state_out[39:32]);
+
+    sbox_sync sb12(state_in[31:24],   clk, state_out[31:24]);
+    sbox_sync sb13(state_in[23:16],   clk, state_out[23:16]);
+    sbox_sync sb14(state_in[15:8],    clk, state_out[15:8]);
+    sbox_sync sb15(state_in[7:0],     clk, state_out[7:0]);
+
+endmodule
+
+// Shift Rows
+module shiftrows(
+    input  logic [127:0] state_in,
+    output logic [127:0] state_out
+);
+    // Row 0
+    assign state_out[127:120] = state_in[127:120];
+    assign state_out[95:88]   = state_in[95:88];
+    assign state_out[63:56]   = state_in[63:56];
+    assign state_out[31:24]   = state_in[31:24];
+
+    // Row 1
+    assign state_out[119:112] = state_in[87:80];
+    assign state_out[87:80]   = state_in[55:48];
+    assign state_out[55:48]   = state_in[23:16];
+    assign state_out[23:16]   = state_in[119:112];
+
+    // Row 2
+    assign state_out[111:104] = state_in[47:40];
+    assign state_out[79:72]   = state_in[15:8];
+    assign state_out[47:40]   = state_in[111:104];
+    assign state_out[15:8]    = state_in[79:72];
+
+    // Row 3
+    assign state_out[103:96]  = state_in[7:0];
+    assign state_out[71:64]   = state_in[103:96];
+    assign state_out[39:32]   = state_in[71:64];
+    assign state_out[7:0]     = state_in[39:32];
+
 endmodule
 
 /////////////////////////////////////////////
