@@ -54,7 +54,7 @@ module testbench_aes_spi();
 	assign comb = {plaintext, key};
     // shift in test vectors, wait until done, and shift out result
     always @(posedge clk) begin
-      if (i == 256) load = 1'b0;
+      if (i == 256) load <= 1'b0;
       if (i<256) begin
         #1; sdi = comb[255-i];
         #1; sck = 1; #5; sck = 0;

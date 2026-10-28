@@ -79,10 +79,18 @@ module aes_core(input  logic         clk,
                 output logic         done, 
                 output logic [127:0] cyphertext);
 
-    logic [9:0] count;
-    count = 0;
+    logic [3:0] count;
 
-    
+    // Initializing main controller
+    aes_main main(
+        .clk(clk),
+        .load(load),
+        .plaintext(plaintext),
+        .key(key),
+        .count(count),
+        .done(done),
+        .cyphertext(cyphertext)
+    );
     
 endmodule
 
@@ -246,4 +254,247 @@ module galoismult(input  logic [7:0] a,
     
     assign ashift = {a[6:0], 1'b0};
     assign y = a[7] ? (ashift ^ 8'b00011011) : ashift;
+endmodule
+
+// Main countroller
+module aes_main(
+    input  logic         clk,
+    input  logic         load,
+    input  logic [127:0] plaintext,
+    input  logic [127:0] key,
+    output logic [3:0]   count,
+    output logic         done,
+    output logic [127:0] cyphertext
+);
+
+    logic initialize;
+    logic save_round;
+    logic skip_mixcolumns;
+
+    logic [127:0] state;
+    logic [127:0] state2;
+    logic [127:0] state3;
+    logic [127:0] state4;
+    logic [127:0] state5;
+
+    logic [127:0] round_key;
+
+    key_expansion expansion(
+        .clk(clk),
+        .load(load),
+        .initialize(initialize),
+        .save_round(save_round),
+        .count(count),
+        .key(key),
+        .round_key(round_key)
+    );
+
+    // Control path
+    aes_controller controller(
+        .clk(clk),
+        .load(load),
+        .count(count),
+        .initialize(initialize),
+        .save_round(save_round),
+        .skip_mixcolumns(skip_mixcolumns),
+        .done(done)
+    );
+
+    // Subbytes
+    subbytes sb(
+        .clk(clk),
+        .state_in(state),
+        .state_out(state2)
+    );
+
+    // Shiftrows
+    shiftrows sr(
+        .state_in(state2),
+        .state_out(state3)
+    );
+
+    // Mixcolumns
+    mixcolumns mc(
+        .a(state3),
+        .y(state4)
+    );
+
+    // Add Round Key
+    // Round 10 skips Mixcolumns
+    assign state5 = (skip_mixcolumns ? state3 : state4) ^ round_key;
+
+    // Store data only when the controller enables it
+    always_ff @(posedge clk) begin
+        if (load) begin
+            state <= 128'b0;
+        end
+        else if (initialize) begin
+            state <= plaintext ^ key;
+        end
+        else if (save_round) begin
+            state <= state5;
+        end
+    end
+
+    // This output is the final ciphertext
+    assign cyphertext = state;
+
+endmodule
+
+
+// AES Controller
+module aes_controller(
+    input  logic       clk,
+    input  logic       load,
+    output logic [3:0] count,
+    output logic       initialize,
+    output logic       save_round,
+    output logic       skip_mixcolumns,
+    output logic       done
+);
+
+    typedef enum logic [1:0] {
+        INITIAL,
+        SUBBYTES,
+        FINISH_ROUND,
+        FINISHED
+    } stage_t;
+
+    stage_t stage;
+
+    // load starts a new encryption.
+    // count = 0 before rounds then rounds
+    always_ff @(posedge clk) begin
+        if (load) begin
+            count <= 0;
+            stage <= INITIAL;
+        end
+
+        else begin
+            case (stage)
+
+                INITIAL: begin
+                    // Datapath stores plaintext ^ key 
+                    count <= 1;
+                    stage <= SUBBYTES;
+                end
+
+                SUBBYTES: begin
+                    // Begin
+                    stage <= FINISH_ROUND;
+                end
+
+                FINISH_ROUND: begin
+                    // End of round
+                    if (count == 10) begin
+                        stage <= FINISHED;
+                    end
+                    else begin
+                        count <= count + 1'b1;
+                        stage <= SUBBYTES;
+                    end
+                end
+
+                FINISHED: begin
+                    // Hold the result
+                    stage <= FINISHED;
+                end
+
+                default: begin
+                    count <= 0;
+                    stage <= INITIAL;
+                end
+
+            endcase
+        end
+    end
+
+    assign initialize      = !load && (stage == INITIAL);
+    assign save_round      = !load && (stage == FINISH_ROUND);
+    assign skip_mixcolumns = (count == 10);
+    assign done            = !load && (stage == FINISHED);
+
+endmodule
+
+// Expanding the key
+module key_expansion(
+    input  logic         clk,
+    input  logic         load,
+    input  logic         initialize,
+    input  logic         save_round,
+    input  logic [3:0]   count,
+    input  logic [127:0] key,
+    output logic [127:0] round_key
+);
+
+    logic [127:0] previous_key;
+    logic [31:0] substituted;
+    logic [31:0] temp;
+    logic [7:0] rcon;
+
+    logic [31:0] word0;
+    logic [31:0] word1;
+    logic [31:0] word2;
+    logic [31:0] word3;
+
+    // Remember the key
+    always_ff @(posedge clk) begin
+        if (load || initialize) begin
+            previous_key <= key;
+        end
+        else if (save_round) begin
+            previous_key <= round_key;
+        end
+    end
+
+    // Rotate the last word left by one byte then substitute
+    // [31:24], [23:16], [15:8], [7:0] --> [23:16], [15:8], [7:0], [31:24]
+
+    sbox sb0(
+        .a(previous_key[23:16]),
+        .y(substituted[31:24])
+    );
+
+    sbox sb1(
+        .a(previous_key[15:8]),
+        .y(substituted[23:16])
+    );
+
+    sbox sb2(
+        .a(previous_key[7:0]),
+        .y(substituted[15:8])
+    );
+
+    sbox sb3(
+        .a(previous_key[31:24]),
+        .y(substituted[7:0])
+    );
+
+    // Round constant
+    always_comb begin
+        case (count)
+            4'd1:    rcon = 8'h01;
+            4'd2:    rcon = 8'h02;
+            4'd3:    rcon = 8'h04;
+            4'd4:    rcon = 8'h08;
+            4'd5:    rcon = 8'h10;
+            4'd6:    rcon = 8'h20;
+            4'd7:    rcon = 8'h40;
+            4'd8:    rcon = 8'h80;
+            4'd9:    rcon = 8'h1b;
+            4'd10:   rcon = 8'h36;
+            default: rcon = 8'h00;
+        endcase
+    end
+
+    assign temp = substituted ^ {rcon, 24'b0};
+
+    // Four words
+    assign word0 = previous_key[127:96] ^ temp;
+    assign word1 = previous_key[95:64]  ^ word0;
+    assign word2 = previous_key[63:32]  ^ word1;
+    assign word3 = previous_key[31:0]   ^ word2;
+
+    assign round_key = {word0, word1, word2, word3};
+
 endmodule
